@@ -909,6 +909,12 @@ function isTextFile(f) {
   return f.type.startsWith("text/") || /json|xml|javascript|yaml|toml|x-sh|x-python/.test(f.type) ||
          TEXT_EXT.test(f.name) || /(^|[\\/])(makefile|dockerfile|readme|license)$/i.test(f.name);
 }
+// known binary formats are refused up front; anything else unknown is judged by its content
+const BINARY_EXT = /\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|zip|7z|rar|gz|tgz|bz2|xz|tar|exe|dll|so|dylib|bin|iso|img|msi|mp3|wav|flac|ogg|m4a|mp4|mkv|avi|mov|webm)$/i;
+function isBinaryFile(f) {
+  return /^(audio|video)\//.test(f.type) || /pdf|zip|compressed|msword|officedocument|opendocument|x-msdownload/.test(f.type) ||
+         BINARY_EXT.test(f.name);
+}
 function addFiles(files) {
   for (const f of files) {
     if (f.type.startsWith("image/")) {
@@ -919,8 +925,19 @@ function addFiles(files) {
       r.readAsDataURL(f);
       continue;
     }
-    if (!isTextFile(f)) { toast("warn", "Not a text file", `${f.name}: attach text files (code, notes, logs, data)${health.images ? " or pictures" : ""}.`); continue; }
+    if (isBinaryFile(f)) { toast("warn", "Not a text file", `${f.name}: PDF, Office, archives and media cannot be attached as text${health.images ? "; attach text files or pictures" : ""}.`); continue; }
     if (f.size > MAX_TEXT_FILE) { toast("warn", "File too large", `${f.name} is over 512 KB.`); continue; }
+    if (!isTextFile(f)) {
+      // unknown type or no extension: accept it if it is valid UTF-8 without NUL bytes
+      f.arrayBuffer().then((buf) => {
+        let text;
+        try { text = new TextDecoder("utf-8", {fatal: true}).decode(buf); } catch { text = null; }
+        if (text == null || text.includes("\u0000")) { toast("warn", "Not a text file", `${f.name} looks like a binary file.`); return; }
+        attachments.push({kind: "file", name: f.name, text});
+        renderAttachments();
+      });
+      continue;
+    }
     const r = new FileReader();
     r.onload = () => {
       const text = String(r.result);
