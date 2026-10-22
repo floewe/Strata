@@ -462,9 +462,21 @@ class McpServer:
 
 
 # ------------------------------------------------------------------------------------------------ the hub
-def result_text(result: dict) -> str:
-    """An MCP tool result as the text the model reads: the text blocks as they are, other blocks named."""
+def result_images(result: dict) -> list[str]:
+    """LOKAL GEPATCHT 19.10.2026 (Frank/Claude): the image blocks of an MCP tool result as data: URLs, so run_with_mcp
+    can hand them to the image encoder like a picture a client's tool returned.  Upstream Strata drops them."""
+    out = []
+    for block in result.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+            out.append(f"data:{block.get('mimeType') or 'image/png'};base64,{block['data']}")
+    return out
+
+
+def result_text(result: dict, attached: bool = False) -> str:
+    """An MCP tool result as the text the model reads: the text blocks as they are, other blocks named.
+    attached (local patch): images are passed on to the model, so their note says so instead of "not shown"."""
     parts = []
+    n_img = 0
     for block in result.get("content") or []:
         if not isinstance(block, dict):
             continue
@@ -479,7 +491,15 @@ def result_text(result: dict) -> str:
             parts.append(f"[resource link: {block.get('name') or ''} {block.get('uri', '')}]".replace("  ", " "))
         elif kind in ("image", "audio"):
             size = len(block.get("data") or "") * 3 // 4
-            parts.append(f"[{kind} ({block.get('mimeType', '?')}, {size:,} bytes): not shown to the model]")
+            if kind == "image" and attached and block.get("data"):
+                n_img += 1
+                # the web app replays only this text in later turns, never the picture itself: say so, or the
+                # model later "remembers" a picture it no longer has and invents its content (seen 19.10.2026)
+                parts.append(f"[image {n_img} ({block.get('mimeType', '?')}, {size:,} bytes): shown to you only "
+                             f"together with this tool result; later messages no longer contain it - write down now "
+                             f"what you need from it, or call the tool again]")
+            else:
+                parts.append(f"[{kind} ({block.get('mimeType', '?')}, {size:,} bytes): not shown to the model]")
         else:
             parts.append(json.dumps(block, ensure_ascii=False))
     if not parts and result.get("structuredContent") is not None:
@@ -554,13 +574,15 @@ class McpHub:
         t0 = time.monotonic()
         server, tool = self._routes.get(name) or self.routes().get(name, (None, name))
         out = {"server": server.name if server else None, "tool": tool}
+        images = []
         if server is None:
             text, ok = f"error: there is no tool named {name!r}", False
         else:
             try:
                 res = server.call(tool, arguments if isinstance(arguments, dict) else {},
                                   float(self.settings["timeout_s"]), cancel)
-                text, ok = result_text(res), not res.get("isError")
+                images = result_images(res) if not res.get("isError") else []        # local patch
+                text, ok = result_text(res, attached=bool(images)), not res.get("isError")
                 if not ok:
                     text = "error: " + (text or "the tool reported an error")
             except McpCancelled:
@@ -573,7 +595,7 @@ class McpHub:
             text = text[:cap] + (f"\n\n[... truncated: the tool returned {full:,} characters; only the first "
                                  f"{cap:,} are shown]")
         out.update(ok=ok, text=text, chars=full, truncated=cap > 0 and full > cap,
-                   ms=int((time.monotonic() - t0) * 1000))
+                   ms=int((time.monotonic() - t0) * 1000), images=images)
         return out
 
     def status(self) -> dict:
