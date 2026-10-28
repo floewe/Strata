@@ -1,0 +1,5 @@
+[strata] layer split: card order 0,2,1 (the faster card last; "gpu_order": "as_given" keeps 0,1,2, #1352)
+[strata] layer split: card order 0,2,1 (the faster card last; "gpu_order": "as_given" keeps 0,1,2, #1352)
+[strata] cards in stage order: GPU 0, then GPU 2, then GPU 1 (as nvidia-smi numbers them); the engine's log calls them CUDA0, CUDA1, CUDA2 - the first runs the first layers and the picture reader, the last runs the head and the draft layer
+[strata] layer split across GPUs [0, 1, 2] (auto)
+ready: http://127.0.0.1:8080/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 65536 tokens)
